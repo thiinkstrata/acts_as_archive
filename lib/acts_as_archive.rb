@@ -194,19 +194,20 @@ class ActsAsArchive
       unless base.included_modules.include?(InstanceMethods)
         base.send :include, InstanceMethods
         base.class_eval do
-          unless method_defined?(:delete_sql_without_archive)
-            alias_method :delete_sql_without_archive, :delete_sql
-            alias_method :delete_sql, :delete_sql_with_archive
+          unless method_defined?(:delete_without_archive)
+            alias_method :delete_without_archive, :delete
+            alias_method :delete, :delete_with_archive
           end
         end
       end
     end
     
     module InstanceMethods
-      def delete_sql_with_archive(sql, name = nil)
+      def delete_with_archive(arel, name = nil, binds = [])
         @mutex ||= Mutex.new
         @mutex.synchronize do
           unless ActsAsArchive.disabled
+            sql = binds.inject(to_sql(arel)) {|a,e| a.sub(/\$\d+/,quote(e[1]))}
             from, where = /DELETE FROM (.+)/i.match(sql)[1].split(/\s+WHERE\s+/i, 2)
             from = from.strip.gsub(/[`"]/, '').split(/\s*,\s*/)
         
@@ -216,7 +217,7 @@ class ActsAsArchive
           end
         end
         
-        delete_sql_without_archive(sql, name)
+        delete_without_archive(arel, name, binds)
       end
     end
   end
