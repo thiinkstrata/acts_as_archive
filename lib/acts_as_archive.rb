@@ -217,14 +217,10 @@ class ActsAsArchive
         @mutex.synchronize do
           unless ActsAsArchive.disabled
             sql = binds.inject(to_sql(arel)) {|a,e| a.sub(/\$\d+/,quote(e[1]))}
-            puts sql
             from, where = /DELETE FROM (.+)/i.match(sql)[1].split(/\s+WHERE\s+/i, 2)
             from = from.strip.gsub(/[`"]/, '').split(/\s*,\s*/)
-            puts from.inspect
-            puts where
         
             from.each do |f|
-              puts f
               ActsAsArchive.find(f) {|config| ActsAsArchive.move(config, where) }
             end
           end
