@@ -11,7 +11,12 @@ $:.unshift File.dirname(__FILE__)
 class ActsAsArchive
   class <<self
     
-    attr_accessor :configuration, :disabled
+    attr_writer :configuration
+    attr_accessor :disabled
+
+    def configuration
+      @configuration ||= {}
+    end
     
     def deprecate(msg)
       if defined?(::ActiveSupport::Deprecation)
@@ -32,34 +37,36 @@ class ActsAsArchive
     end
     
     def find(from)
-      from = [ from ] unless from.is_a?(::Array)
-      (@configuration || []).select do |hash|
-        if from[0].is_a?(::String)
-          from.include?(hash[:from].table_name)
-        else
-          from.include?(hash[:from])
-        end
-      end
+      result = configuration[from.is_a?(::String) ? from : from.table_name]
+      yield result if result.present? and block_given?
+      result
     end
-    
+
+    def register(klass)
+      klass = eval(klass) rescue nil if klass.is_a?(::String)
+      klass ? configuration[klass.table_name] ||= {:from => klass} : nil
+    end
+
     def load_from_yaml(root)
       if File.exists?(yaml = "#{root}/config/acts_as_archive.yml")
-        YAML.load(File.read(yaml)).each do |klass, config|
-          klass = eval(klass) rescue nil
-          if klass
-            if (%w(class table) - config.last.keys).empty?
-              options = {}
-            else
-              options = config.pop
-            end
-            config.each do |c|
-              klass.acts_as_archive options.merge(c)
+        YAML.load(File.read(yaml)).
+          each_key {|k| ActsAsArchive.register(k)}.
+          each do |klass, config|
+            klass = eval(klass) rescue nil
+            if klass
+              if (%w(class table) - config.last.keys).empty?
+                options = {}
+              else
+                options = config.pop
+              end
+              config.each do |c|
+                klass.acts_as_archive options.merge(c)
+              end
             end
           end
-        end
       end
     end
-    
+
     def move(config, where, merge_options={})
       options = config[:options].dup.merge(merge_options)
       if options[:conditions]
@@ -85,10 +92,12 @@ class ActsAsArchive
 
     module ClassMethods
       def acts_as_archive(options={})
-        return unless ActsAsArchive.find(self).empty?
-        
-        ActsAsArchive.configuration ||= []
-        ActsAsArchive.configuration << (config = { :from => self })
+        config = ActsAsArchive.find(self)
+        if config
+          return if config[:to].present?
+        else
+          config = ActsAsArchive.register(self)
+        end
         
         options[:copy] = true
         
@@ -127,7 +136,7 @@ class ActsAsArchive
           klass.acts_as_archive(:class => self, :archive => true)
         
           self.reflect_on_all_associations.each do |association|
-            if association.options[:dependent] && !ActsAsArchive.find(association.klass).empty?
+            if association.options[:dependent] && ActsAsArchive.find(association.klass)
               opts = association.options.dup
               opts[:class_name] = "::#{association.class_name}::Archive"
               opts[:foreign_key] = association.primary_key_name
@@ -158,7 +167,7 @@ class ActsAsArchive
       
       def migrate_from_acts_as_paranoid
         time = Benchmark.measure do
-          ActsAsArchive.find(self).each do |config|
+          ActsAsArchive.find(self) do |config|
             config = config.dup
             config[:options][:copy] = false
             ActsAsArchive.move(
@@ -208,11 +217,15 @@ class ActsAsArchive
         @mutex.synchronize do
           unless ActsAsArchive.disabled
             sql = binds.inject(to_sql(arel)) {|a,e| a.sub(/\$\d+/,quote(e[1]))}
+            puts sql
             from, where = /DELETE FROM (.+)/i.match(sql)[1].split(/\s+WHERE\s+/i, 2)
             from = from.strip.gsub(/[`"]/, '').split(/\s*,\s*/)
+            puts from.inspect
+            puts where
         
-            ActsAsArchive.find(from).each do |config|
-              ActsAsArchive.move(config, where)
+            from.each do |f|
+              puts f
+              ActsAsArchive.find(f) {|config| ActsAsArchive.move(config, where) }
             end
           end
         end
