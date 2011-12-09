@@ -43,7 +43,7 @@ class ActsAsArchive
     end
 
     def register(klass)
-      klass = eval(klass) rescue nil if klass.is_a?(::String)
+      klass = eval(klass) if klass.is_a?(::String)
       klass ? configuration[klass.table_name] ||= {:from => klass} : nil
     end
 
