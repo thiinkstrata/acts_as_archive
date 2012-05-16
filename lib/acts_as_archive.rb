@@ -47,6 +47,13 @@ class ActsAsArchive
       klass ? configuration[klass.table_name] ||= {:from => klass} : nil
     end
 
+    def reload
+      configuration.values.each do |config|
+        config[:to] = nil
+        config[:from].acts_as_archive config[:options]
+      end
+    end
+
     def load_from_yaml(root)
       if File.exists?(yaml = "#{root}/config/acts_as_archive.yml")
         YAML.load(File.read(yaml)).
